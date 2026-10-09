@@ -2991,6 +2991,28 @@ fn in_workspace_only_default_members_are_mutated_if_present() {
 }
 
 #[test]
+fn baseline_honors_test_package() {
+    // A `cargo test` argument that only exists in the test package used to
+    // break the baseline, which ran the mutated package's tests instead of
+    // the one named by `--test-package`.
+    //
+    // <https://github.com/sourcefrog/cargo-mutants/issues/662>
+    let tmp = copy_of_testdata("cross_package_tests");
+    run()
+        .args([
+            "mutants",
+            "--test-package=cargo-mutants-testdata-cross-package-tests-tests",
+            "--shard=0/4",
+        ])
+        .arg("-d")
+        .arg(tmp.path().join("lib"))
+        .args(["--", "--test", "lib"])
+        .assert()
+        .stdout(predicate::str::contains("1 caught"))
+        .code(0);
+}
+
+#[test]
 fn cross_package_tests() {
     // This workspace has two packages, one of which contains the tests.
     // Mutating the one with no tests will find test gaps, but

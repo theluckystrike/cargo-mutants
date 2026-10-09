@@ -12,6 +12,8 @@
 
 - Fixed: Support for Illumos, by updating to `fs4`.
 
+- Fixed: `--test-package` and `--test-workspace` now apply to the baseline as well as to the mutants, so `cargo test` arguments that name a target in the test package no longer fail the baseline ([#662](https://github.com/sourcefrog/cargo-mutants/issues/662)).
+
 ## 27.1.0
 
 Released 2026-06-02.

@@ -183,9 +183,12 @@ impl Lab<'_> {
             .sorted_by_key(|p| p.name.clone())
             .unique()
             .collect_vec();
+        let test_packages = self
+            .tests_for_mutant
+            .package_selection(&all_mutated_packages);
         self.make_worker(build_dir).run_one_scenario(
             &Scenario::Baseline,
-            &PackageSelection::Explicit(all_mutated_packages),
+            &test_packages,
             Timeouts::for_baseline(self.options),
         )
     }
@@ -242,13 +245,9 @@ impl Worker<'_> {
                 return Ok(());
             };
             let _span = debug_span!("mutant", name = mutant.name(false)).entered();
-            let test_packages = match self.tests_for_mutant {
-                TestsForMutant::Workspace => PackageSelection::All,
-                TestsForMutant::Mutated => {
-                    PackageSelection::Explicit(vec![mutant.source_file.package.clone()])
-                }
-                TestsForMutant::Explicit(packages) => PackageSelection::Explicit(packages.clone()),
-            };
+            let test_packages = self
+                .tests_for_mutant
+                .package_selection(std::slice::from_ref(&mutant.source_file.package));
             self.run_one_scenario(&Scenario::Mutant(mutant), &test_packages, timeouts)?;
         }
     }
@@ -346,5 +345,50 @@ impl TestsForMutant {
                 TestsForMutant::Explicit(workspace.packages_by_name(package_names))
             }
         }
+    }
+
+    /// The package selection for a scenario. `mutated_packages` is the package(s)
+    /// that contain the mutation; for the baseline it is all packages with a
+    /// mutant, for a single mutant it is just that mutant's package.
+    ///
+    /// This honors `--test-package` / `--test-workspace` for the baseline too,
+    /// which previously hardcoded the mutated packages (#662).
+    fn package_selection(&self, mutated_packages: &[Arc<Package>]) -> PackageSelection {
+        match self {
+            TestsForMutant::Workspace => PackageSelection::All,
+            TestsForMutant::Mutated => PackageSelection::Explicit(mutated_packages.to_vec()),
+            TestsForMutant::Explicit(packages) => PackageSelection::Explicit(packages.clone()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::test_util::copy_of_testdata;
+
+    /// The baseline scenario must honor `--test-package` / `--test-workspace`,
+    /// not just the packages that contain a mutated file (#662).
+    #[test]
+    fn baseline_uses_test_package_selection() {
+        let tmp = copy_of_testdata("cross_package_tests");
+        let workspace = Workspace::open(&tmp).unwrap();
+        let lib_pkg = workspace
+            .packages_by_name(&["cargo-mutants-testdata-cross-package-tests-lib"])
+            .pop()
+            .unwrap();
+        let tests_pkg = workspace
+            .packages_by_name(&["cargo-mutants-testdata-cross-package-tests-tests"])
+            .pop()
+            .unwrap();
+        // `--test-package <tests>` names the package that actually runs the tests.
+        let tests_for_mutant = TestsForMutant::Explicit(vec![tests_pkg.clone()]);
+        // The baseline runs on the unmutated tree; the mutated package is `lib`.
+        let selection = tests_for_mutant.package_selection(&[lib_pkg]);
+        // The baseline must select the named test package, not the mutated one.
+        assert!(matches!(
+            selection,
+            PackageSelection::Explicit(packages) if packages == vec![tests_pkg]
+        ));
     }
 }
